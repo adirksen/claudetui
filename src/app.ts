@@ -60,6 +60,11 @@ let mouseEnabled = true;
 // showHelp()/closeHelp() toggle this so wireMouse()'s isOverlayOpen() knows
 // mouse routing should stay suppressed while the help overlay is open.
 let helpOpen = false;
+// Set by showHelp() to that invocation's closeHelp, cleared by closeHelp()
+// when it runs. Lets the resize handler and a fresh showHelp() call close a
+// surviving help box that would otherwise be orphaned — see resize handler
+// and showHelp() below.
+let closeActiveHelp: (() => void) | null = null;
 // Tag-stripped rendered status text, kept in sync inside updateStatusBar so
 // status-bar hit-testing always matches what's actually on screen.
 let statusPlainText = "";
@@ -245,6 +250,11 @@ export async function startApp(
 
       // Rebuild grid on terminal resize (contrib.grid uses absolute px at creation time)
       screen.on("resize", () => {
+        // Close any open help overlay first — rebuildLayout() re-appends
+        // panels over the surviving helpBox, orphaning it: helpOpen stays
+        // true (permanently suppressing mouse routing) and the post-rebuild
+        // render steals focus so the box's Esc handler goes dead too.
+        closeActiveHelp?.();
         if (inDrillDown) return;
         showLoading("Resizing...");
         rebuildLayout();
@@ -463,6 +473,11 @@ async function drillIntoHistory(): Promise<void> {
 // ── Help overlay ──────────────────────────────────────────────────────────────
 
 function showHelp(): void {
+  // Close any surviving help box first — e.g. pressing "?" again before the
+  // old box's own key handler ran would otherwise leave two boxes stacked
+  // and desync helpOpen. Idempotent: closeActiveHelp is a no-op once fired.
+  closeActiveHelp?.();
+
   const helpBox = blessed.box({
     top: "center",
     left: "center",
@@ -519,11 +534,17 @@ function showHelp(): void {
   };
 
   const closeHelp = () => {
+    // Idempotent — may be invoked via the resize handler, a fresh showHelp(),
+    // and the box's own key handler, in any order.
+    if (!helpOpen) return;
     if (mouseEnabled) screen.removeListener("mouse", outsideClick);
     helpBox.destroy();
     helpOpen = false;
+    closeActiveHelp = null;
     screen.render();
   };
+
+  closeActiveHelp = closeHelp;
 
   // A screen-level "mouse" listener is itself enough to make blessed enable
   // the terminal's mouse protocol, so --no-mouse must skip registering this
