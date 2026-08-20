@@ -4,6 +4,16 @@ type FocusableWidget = blessed.Widgets.BlessedElement & {
   focus: () => void;
 };
 
+export interface FocusController {
+  focusPanel(index: number): void;
+  getFocusIndex(): number;
+}
+
+/** Wrap an index into [0, length) with negative-safe modulo. */
+export function wrapIndex(index: number, length: number): number {
+  return ((index % length) + length) % length;
+}
+
 export function setupKeybindings(
   screen: blessed.Widgets.Screen,
   panels: FocusableWidget[],
@@ -13,11 +23,11 @@ export function setupKeybindings(
     onDrillOut: () => void;
     onHelp: () => void;
   }
-): void {
+): FocusController {
   let focusIndex = 0;
 
   function focusPanel(index: number): void {
-    focusIndex = ((index % panels.length) + panels.length) % panels.length;
+    focusIndex = wrapIndex(index, panels.length);
     panels[focusIndex]?.focus();
     screen.render();
   }
@@ -45,4 +55,6 @@ export function setupKeybindings(
 
   // Focus first panel
   focusPanel(0);
+
+  return { focusPanel, getFocusIndex: () => focusIndex };
 }

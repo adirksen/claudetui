@@ -1,6 +1,6 @@
 import blessed from "blessed";
 import { createDashboard, type DashboardWidgets } from "./ui/layout.js";
-import { setupKeybindings } from "./ui/keybindings.js";
+import { setupKeybindings, type FocusController } from "./ui/keybindings.js";
 import { COLORS, PANEL_BORDER_COLORS, TABLE_PANEL_INDICES } from "./ui/theme.js";
 import { INTERVALS, applyPricingOverrides } from "./config.js";
 import { showLoadingOverlay } from "./ui/loading-overlay.js";
@@ -52,6 +52,9 @@ let cachedSessions: ActiveSession[] = [];
 let cachedHistory: HistoryEntry[] = [];
 let inDrillDown = false;
 let hideLoading: (() => void) | undefined;
+// Assigned in startApp; read by mouse click routing wired up in a later task.
+// @ts-expect-error -- TS6133: unread until that task lands.
+let focusController: FocusController;
 
 // A single refresh scans every recent transcript, so overlapping runs would
 // compete for the same I/O. One runs at a time; requests that arrive mid-run
@@ -166,7 +169,7 @@ export async function startApp(): Promise<void> {
 
       rebuildLayout();
 
-      setupKeybindings(screen, focusable, {
+      focusController = setupKeybindings(screen, focusable, {
         onRefresh: () => void refreshAll(),
         onDrillIn: (panelIndex) => {
           if (panelIndex === HISTORY_PANEL_INDEX) {
