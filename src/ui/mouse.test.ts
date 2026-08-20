@@ -3,6 +3,7 @@ import {
   rowIndexFromClick,
   hintRegions,
   hintActionAt,
+  rowClickOutcome,
   type HintRegion,
 } from "./mouse.js";
 
@@ -70,5 +71,14 @@ describe("hintActionAt", () => {
   it("returns null between and outside regions", () => {
     expect(hintActionAt(regions, 15)).toBeNull();
     expect(hintActionAt(regions, 999)).toBeNull();
+  });
+});
+
+describe("rowClickOutcome", () => {
+  it("selects when clicking a row that is not selected", () => {
+    expect(rowClickOutcome(3, 0)).toBe("select");
+  });
+  it("drills when clicking the already-selected row", () => {
+    expect(rowClickOutcome(3, 3)).toBe("drill");
   });
 });

@@ -1,6 +1,7 @@
 import blessed from "blessed";
 import { createDashboard, type DashboardWidgets } from "./ui/layout.js";
 import { setupKeybindings, type FocusController } from "./ui/keybindings.js";
+import { setupMouse } from "./ui/mouse.js";
 import { COLORS, PANEL_BORDER_COLORS, TABLE_PANEL_INDICES } from "./ui/theme.js";
 import { INTERVALS, applyPricingOverrides } from "./config.js";
 import { showLoadingOverlay } from "./ui/loading-overlay.js";
@@ -52,9 +53,12 @@ let cachedSessions: ActiveSession[] = [];
 let cachedHistory: HistoryEntry[] = [];
 let inDrillDown = false;
 let hideLoading: (() => void) | undefined;
-// Assigned in startApp; read by mouse click routing wired up in a later task.
-// @ts-expect-error -- TS6133: unread until that task lands.
+// Assigned in startApp; read by mouse click routing.
 let focusController: FocusController;
+// Task 6 threads this flag from --no-mouse.
+let mouseEnabled = true;
+// Task 5's help overlay toggles this; initialized false is harmless until then.
+let helpOpen = false;
 
 // A single refresh scans every recent transcript, so overlapping runs would
 // compete for the same I/O. One runs at a time; requests that arrive mid-run
@@ -98,6 +102,14 @@ function rebuildLayout(): void {
 
   setupFocusHighlighting();
 
+  // Re-wire mouse listeners — rebuild destroys and recreates every widget, so
+  // any prior listeners are gone with them. Guarded: on the very first call
+  // (from startApp, before setupKeybindings runs) focusController is still
+  // undefined; startApp makes the one explicit wireMouse() call for that case.
+  if (mouseEnabled && focusController) {
+    wireMouse();
+  }
+
   // Reset stale fingerprints so fresh widgets always get populated after rebuild
   resetTokensFP();
   resetSystemFP();
@@ -134,6 +146,17 @@ function setupFocusHighlighting(): void {
         panel as unknown as { style: { border: { fg: string } } }
       ).style.border.fg = origColor;
     });
+  });
+}
+
+/** setupMouse call shared by rebuildLayout()'s resize path and startApp's initial wiring. */
+function wireMouse(): void {
+  setupMouse(screen, focusable, focusController, {
+    onDrillIn: (panelIndex) => {
+      if (panelIndex === HISTORY_PANEL_INDEX) void drillIntoHistory();
+      else if (panelIndex === SESSIONS_PANEL_INDEX) void drillIntoSession();
+    },
+    isOverlayOpen: () => inDrillDown || helpOpen,
   });
 }
 
@@ -184,6 +207,13 @@ export async function startApp(): Promise<void> {
         },
         onHelp: () => showHelp(),
       });
+
+      // First rebuildLayout() ran before focusController existed (its own
+      // guard skipped setupMouse), so wire it explicitly here. Every
+      // subsequent rebuild (resize) re-wires itself via the guard above.
+      if (mouseEnabled) {
+        wireMouse();
+      }
 
       // Rebuild grid on terminal resize (contrib.grid uses absolute px at creation time)
       screen.on("resize", () => {
