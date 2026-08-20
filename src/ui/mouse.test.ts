@@ -5,6 +5,7 @@ import {
   hintActionAt,
   rowClickOutcome,
   contentColumnFromClick,
+  isPointInBounds,
   type HintRegion,
 } from "./mouse.js";
 
@@ -98,5 +99,28 @@ describe("rowClickOutcome", () => {
   });
   it("drills when clicking the already-selected row", () => {
     expect(rowClickOutcome(3, 3)).toBe("drill");
+  });
+});
+
+describe("isPointInBounds", () => {
+  const bounds = { x: 10, y: 5, width: 20, height: 8 };
+
+  it("is true for a point in the middle of the bounds", () => {
+    expect(isPointInBounds(15, 8, bounds)).toBe(true);
+  });
+
+  it("is true on the top-left edge (inclusive)", () => {
+    expect(isPointInBounds(10, 5, bounds)).toBe(true);
+  });
+
+  it("is false on the bottom-right edge (exclusive)", () => {
+    expect(isPointInBounds(30, 13, bounds)).toBe(false);
+  });
+
+  it("is false to the left, above, right, and below the bounds", () => {
+    expect(isPointInBounds(9, 8, bounds)).toBe(false);
+    expect(isPointInBounds(15, 4, bounds)).toBe(false);
+    expect(isPointInBounds(30, 8, bounds)).toBe(false);
+    expect(isPointInBounds(15, 13, bounds)).toBe(false);
   });
 });

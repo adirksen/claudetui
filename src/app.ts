@@ -1,7 +1,7 @@
 import blessed from "blessed";
 import { createDashboard, type DashboardWidgets } from "./ui/layout.js";
 import { setupKeybindings, type FocusController } from "./ui/keybindings.js";
-import { setupMouse, setupStatusBarMouse } from "./ui/mouse.js";
+import { setupMouse, setupStatusBarMouse, isPointInBounds } from "./ui/mouse.js";
 import { COLORS, PANEL_BORDER_COLORS, TABLE_PANEL_INDICES } from "./ui/theme.js";
 import { INTERVALS, applyPricingOverrides } from "./config.js";
 import { showLoadingOverlay } from "./ui/loading-overlay.js";
@@ -57,7 +57,8 @@ let hideLoading: (() => void) | undefined;
 let focusController: FocusController;
 // Task 6 threads this flag from --no-mouse.
 let mouseEnabled = true;
-// Task 5's help overlay toggles this; initialized false is harmless until then.
+// showHelp()/closeHelp() toggle this so wireMouse()'s isOverlayOpen() knows
+// mouse routing should stay suppressed while the help overlay is open.
 let helpOpen = false;
 // Tag-stripped rendered status text, kept in sync inside updateStatusBar so
 // status-bar hit-testing always matches what's actually on screen.
@@ -476,6 +477,7 @@ function showHelp(): void {
       "  {yellow-fg}r{/yellow-fg}                 Force refresh",
       "  {yellow-fg}q / Ctrl+C{/yellow-fg}        Quit",
       "  {yellow-fg}?{/yellow-fg}                 Toggle help",
+      "  {yellow-fg}Mouse{/yellow-fg}             Click panels/rows; wheel scrolls",
       "",
       "  {cyan-fg}⚡ Sessions{/cyan-fg}  — Enter to drill in",
       "  {cyan-fg}📜 History{/cyan-fg}   — Enter for session detail",
@@ -487,11 +489,33 @@ function showHelp(): void {
   screen.append(helpBox);
   helpBox.focus();
   screen.render();
+  helpOpen = true;
 
-  helpBox.key(["escape", "q", "?", "enter", "space"], () => {
+  // Click-outside-to-close: the screen-level "mouse" event fires for every
+  // mouse action (including mousemove), so it's filtered to "mousedown" —
+  // see node_modules/blessed/lib/program.js:677/749/891/930, where that's
+  // the action string blessed's parser actually assigns on button-press.
+  const outsideClick = (data: { x: number; y: number; action?: string }) => {
+    if (data.action !== "mousedown") return;
+    const bounds = helpBox as unknown as { atop: number; aleft: number };
+    const inside = isPointInBounds(data.x, data.y, {
+      x: Number(bounds.aleft),
+      y: Number(bounds.atop),
+      width: Number(helpBox.width),
+      height: Number(helpBox.height),
+    });
+    if (!inside) closeHelp();
+  };
+
+  const closeHelp = () => {
+    screen.removeListener("mouse", outsideClick);
     helpBox.destroy();
+    helpOpen = false;
     screen.render();
-  });
+  };
+
+  screen.on("mouse", outsideClick);
+  helpBox.key(["escape", "q", "?", "enter", "space"], closeHelp);
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────

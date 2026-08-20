@@ -15,6 +15,7 @@ import {
   extractModel,
 } from "../../data/conversation-reader.js";
 import { estimateCost } from "../../aggregators/token-aggregator.js";
+import { isPointInBounds } from "../mouse.js";
 import { basename } from "node:path";
 
 const SEP = `  {gray-fg}${"─".repeat(66)}{/gray-fg}`;
@@ -74,6 +75,7 @@ export async function showHistoryDetail(
     },
     label: " Session History ",
     scrollable: true,
+    mouse: true,
     keys: true,
     vi: true,
     alwaysScroll: true,
@@ -198,5 +200,25 @@ export async function showHistoryDetail(
       resolve();
     };
     container.key(["escape", "q", "enter"], close);
+
+    // No distinct header element exists here — container is a single
+    // scrollable box whose top border carries the " Session History " label.
+    // That border row is the closest equivalent to session-detail's clickable
+    // header, so a click confined to that one row (not the scrollable body
+    // beneath it) closes the view.
+    container.on("click", (data: { x: number; y: number }) => {
+      const bounds = container as unknown as {
+        atop: number;
+        aleft: number;
+        width: number;
+      };
+      const isTopBar = isPointInBounds(data.x, data.y, {
+        x: Number(bounds.aleft),
+        y: Number(bounds.atop),
+        width: Number(bounds.width),
+        height: 1,
+      });
+      if (isTopBar) close();
+    });
   });
 }

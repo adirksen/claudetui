@@ -71,6 +71,28 @@ export function hintActionAt(
   return null;
 }
 
+/** An absolute-coordinate rectangle: top/left inclusive, bottom/right exclusive. */
+export interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Whether an absolute click point falls within a rectangle. Shared by the
+ * help overlay's click-outside-to-close check and the history-detail view's
+ * clickable top bar.
+ */
+export function isPointInBounds(px: number, py: number, bounds: Bounds): boolean {
+  return (
+    px >= bounds.x &&
+    px < bounds.x + bounds.width &&
+    py >= bounds.y &&
+    py < bounds.y + bounds.height
+  );
+}
+
 export type RowClickOutcome = "select" | "drill";
 
 /** Click-once selects; click-the-selected-row drills. No double-click timing. */

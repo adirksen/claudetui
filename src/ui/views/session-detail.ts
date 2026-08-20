@@ -53,7 +53,9 @@ export function showSessionDetail(
     : "{red-fg}○ dead{/red-fg}";
 
   // ── Header ─────────────────────────────────────────────────────────────────
-  blessed.box({
+  // Captured so a click on it can close the view — the header text names the
+  // action ("[Esc/q: back]"), so clicking it performs that action.
+  const header = blessed.box({
     parent: container,
     top: 0,
     left: 0,
@@ -134,6 +136,7 @@ export function showSessionDetail(
     border: { type: "line" },
     label: ` Agents (${agents.length}) `,
     scrollable: true,
+    mouse: true,
     keys: true,
     vi: true,
     style: {
@@ -179,6 +182,7 @@ export function showSessionDetail(
     border: { type: "line" },
     label: " Messages (j/k to scroll) ",
     scrollable: true,
+    mouse: true,
     keys: true,
     vi: true,
     alwaysScroll: true,
@@ -211,6 +215,9 @@ export function showSessionDetail(
   // Register close on both the messages panel (default focus) and the container
   messages.key(["escape", "q"], closeHandler);
   container.key(["escape", "q"], closeHandler);
+  // Clicking the header (which reads "[Esc/q: back]") performs that action —
+  // the views are full-screen, so there is no "outside" to click.
+  header.on("click", closeHandler);
 
   return closeHandler;
 }
