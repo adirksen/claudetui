@@ -4,6 +4,7 @@ import {
   hintRegions,
   hintActionAt,
   rowClickOutcome,
+  contentColumnFromClick,
   type HintRegion,
 } from "./mouse.js";
 
@@ -71,6 +72,23 @@ describe("hintActionAt", () => {
   it("returns null between and outside regions", () => {
     expect(hintActionAt(regions, 15)).toBeNull();
     expect(hintActionAt(regions, 999)).toBeNull();
+  });
+});
+
+describe("contentColumnFromClick", () => {
+  it("subtracts both the widget's left edge and its border inset", () => {
+    // A line-bordered widget (ileft 1) starting at absolute column 0: its
+    // content column 0 renders at absolute column 1, so an absolute click at
+    // column 2 lands on content column 1.
+    expect(contentColumnFromClick(2, 0, 1)).toBe(1);
+  });
+
+  it("passes through unchanged for a borderless widget (ileft 0)", () => {
+    expect(contentColumnFromClick(5, 0, 0)).toBe(5);
+  });
+
+  it("also subtracts a non-zero aleft alongside the border inset", () => {
+    expect(contentColumnFromClick(13, 10, 1)).toBe(2);
   });
 });
 

@@ -166,7 +166,10 @@ function wireMouse(): void {
     isOverlayOpen,
   });
   setupStatusBarMouse(
-    widgets.statusBar as unknown as blessed.Widgets.BlessedElement & { aleft: number },
+    widgets.statusBar as unknown as blessed.Widgets.BlessedElement & {
+      aleft: number;
+      ileft: number;
+    },
     focusController,
     () => statusPlainText,
     {

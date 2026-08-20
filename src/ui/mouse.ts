@@ -45,6 +45,21 @@ export function hintRegions(plainStatusText: string): HintRegion[] {
   return regions.sort((a, b) => a.start - b.start);
 }
 
+/**
+ * Convert an absolute click column into a column within a widget's rendered
+ * content. Bordered widgets (e.g. `border: {type: "line"}`) render content
+ * starting at `aleft + ileft`, not `aleft` — blessed's `ileft` is 1 for a
+ * line border, 0 for none. Skipping the inset silently shifts every hit-test
+ * one column left of what's actually on screen.
+ */
+export function contentColumnFromClick(
+  absoluteX: number,
+  aleft: number,
+  ileft: number
+): number {
+  return absoluteX - aleft - ileft;
+}
+
 /** The action whose region contains `column`, or null. Bounds are inclusive. */
 export function hintActionAt(
   regions: HintRegion[],
@@ -140,7 +155,7 @@ export function setupMouse(
  * statusBar widget is recreated on every rebuildLayout() (e.g. on resize).
  */
 export function setupStatusBarMouse(
-  statusBar: blessed.Widgets.BlessedElement & { aleft: number },
+  statusBar: blessed.Widgets.BlessedElement & { aleft: number; ileft: number },
   controller: FocusController,
   getPlainText: () => string,
   actions: {
@@ -152,7 +167,11 @@ export function setupStatusBarMouse(
 ): void {
   statusBar.on("click", (data: { x: number }) => {
     if (isOverlayOpen()) return;
-    const column = data.x - statusBar.aleft;
+    const column = contentColumnFromClick(
+      data.x,
+      statusBar.aleft,
+      statusBar.ileft ?? 0
+    );
     const action = hintActionAt(hintRegions(getPlainText()), column);
     switch (action) {
       case "tab":
