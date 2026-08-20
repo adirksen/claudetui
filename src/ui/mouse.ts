@@ -211,3 +211,8 @@ export function setupStatusBarMouse(
     }
   });
 }
+
+/** True unless --no-mouse appears in argv. */
+export function parseMouseFlag(argv: string[]): boolean {
+  return !argv.includes("--no-mouse");
+}

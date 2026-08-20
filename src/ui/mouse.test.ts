@@ -6,6 +6,7 @@ import {
   rowClickOutcome,
   contentColumnFromClick,
   isPointInBounds,
+  parseMouseFlag,
   type HintRegion,
 } from "./mouse.js";
 
@@ -122,5 +123,14 @@ describe("isPointInBounds", () => {
     expect(isPointInBounds(15, 4, bounds)).toBe(false);
     expect(isPointInBounds(30, 8, bounds)).toBe(false);
     expect(isPointInBounds(15, 13, bounds)).toBe(false);
+  });
+});
+
+describe("parseMouseFlag", () => {
+  it("defaults to mouse on", () => {
+    expect(parseMouseFlag(["node", "claudetui"])).toBe(true);
+  });
+  it("disables with --no-mouse anywhere in argv", () => {
+    expect(parseMouseFlag(["node", "claudetui", "--no-mouse"])).toBe(false);
   });
 });

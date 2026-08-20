@@ -198,9 +198,13 @@ function dismissLoading(): void {
  * Start the TUI application.
  * Returns a promise that resolves only when the user quits (q / Ctrl+C).
  */
-export async function startApp(): Promise<void> {
+export async function startApp(
+  options: { mouse?: boolean } = {}
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     try {
+      mouseEnabled = options.mouse ?? true;
+
       screen = blessed.screen({
         smartCSR: true,
         title: "claudetui — Claude Code Monitor",
@@ -429,10 +433,17 @@ async function drillIntoSession(): Promise<void> {
     readConversation(projectDir, session.sessionId),
   ]);
 
-  showSessionDetail(screen, session, agents, entries, () => {
-    inDrillDown = false;
-    void refreshAll();
-  });
+  showSessionDetail(
+    screen,
+    session,
+    agents,
+    entries,
+    () => {
+      inDrillDown = false;
+      void refreshAll();
+    },
+    mouseEnabled
+  );
 }
 
 async function drillIntoHistory(): Promise<void> {
@@ -444,7 +455,7 @@ async function drillIntoHistory(): Promise<void> {
   if (!entry) return;
 
   inDrillDown = true;
-  await showHistoryDetail(screen, entry, cachedHistory);
+  await showHistoryDetail(screen, entry, cachedHistory, mouseEnabled);
   inDrillDown = false;
   void refreshAll();
 }
@@ -508,13 +519,18 @@ function showHelp(): void {
   };
 
   const closeHelp = () => {
-    screen.removeListener("mouse", outsideClick);
+    if (mouseEnabled) screen.removeListener("mouse", outsideClick);
     helpBox.destroy();
     helpOpen = false;
     screen.render();
   };
 
-  screen.on("mouse", outsideClick);
+  // A screen-level "mouse" listener is itself enough to make blessed enable
+  // the terminal's mouse protocol, so --no-mouse must skip registering this
+  // one too, not just setupMouse/setupStatusBarMouse.
+  if (mouseEnabled) {
+    screen.on("mouse", outsideClick);
+  }
   helpBox.key(["escape", "q", "?", "enter", "space"], closeHelp);
 }
 

@@ -35,7 +35,8 @@ function row(label: string, value: string, label2?: string, value2?: string): st
 export async function showHistoryDetail(
   screen: blessed.Widgets.Screen,
   entry: HistoryEntry,
-  allEntries: HistoryEntry[]
+  allEntries: HistoryEntry[],
+  mouseEnabled = true
 ): Promise<void> {
   const sessionEntries = allEntries
     .filter((e) => e.sessionId === entry.sessionId)
@@ -75,7 +76,7 @@ export async function showHistoryDetail(
     },
     label: " Session History ",
     scrollable: true,
-    mouse: true,
+    mouse: mouseEnabled,
     keys: true,
     vi: true,
     alwaysScroll: true,
@@ -205,20 +206,24 @@ export async function showHistoryDetail(
     // scrollable box whose top border carries the " Session History " label.
     // That border row is the closest equivalent to session-detail's clickable
     // header, so a click confined to that one row (not the scrollable body
-    // beneath it) closes the view.
-    container.on("click", (data: { x: number; y: number }) => {
-      const bounds = container as unknown as {
-        atop: number;
-        aleft: number;
-        width: number;
-      };
-      const isTopBar = isPointInBounds(data.x, data.y, {
-        x: Number(bounds.aleft),
-        y: Number(bounds.atop),
-        width: Number(bounds.width),
-        height: 1,
+    // beneath it) closes the view. Registering a click listener is itself
+    // enough to make blessed enable the terminal's mouse protocol, so this is
+    // skipped when --no-mouse is set.
+    if (mouseEnabled) {
+      container.on("click", (data: { x: number; y: number }) => {
+        const bounds = container as unknown as {
+          atop: number;
+          aleft: number;
+          width: number;
+        };
+        const isTopBar = isPointInBounds(data.x, data.y, {
+          x: Number(bounds.aleft),
+          y: Number(bounds.atop),
+          width: Number(bounds.width),
+          height: 1,
+        });
+        if (isTopBar) close();
       });
-      if (isTopBar) close();
-    });
+    }
   });
 }

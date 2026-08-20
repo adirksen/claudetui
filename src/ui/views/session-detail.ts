@@ -26,7 +26,8 @@ export function showSessionDetail(
   session: ActiveSession,
   agents: AgentInfo[],
   entries: ConversationEntry[],
-  onClose: () => void
+  onClose: () => void,
+  mouseEnabled = true
 ): () => void {
   // Root container
   const container = blessed.box({
@@ -136,7 +137,7 @@ export function showSessionDetail(
     border: { type: "line" },
     label: ` Agents (${agents.length}) `,
     scrollable: true,
-    mouse: true,
+    mouse: mouseEnabled,
     keys: true,
     vi: true,
     style: {
@@ -182,7 +183,7 @@ export function showSessionDetail(
     border: { type: "line" },
     label: " Messages (j/k to scroll) ",
     scrollable: true,
-    mouse: true,
+    mouse: mouseEnabled,
     keys: true,
     vi: true,
     alwaysScroll: true,
@@ -216,8 +217,12 @@ export function showSessionDetail(
   messages.key(["escape", "q"], closeHandler);
   container.key(["escape", "q"], closeHandler);
   // Clicking the header (which reads "[Esc/q: back]") performs that action —
-  // the views are full-screen, so there is no "outside" to click.
-  header.on("click", closeHandler);
+  // the views are full-screen, so there is no "outside" to click. Registering
+  // a click listener is itself enough to make blessed enable the terminal's
+  // mouse protocol, so this is skipped when --no-mouse is set.
+  if (mouseEnabled) {
+    header.on("click", closeHandler);
+  }
 
   return closeHandler;
 }

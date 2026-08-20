@@ -88,6 +88,20 @@ npm link             # then run `claudetui` from anywhere
 
 Within drill-down views, `j` / `k` or arrow keys scroll content.
 
+### Mouse
+
+Mouse support is on by default: click a panel to focus it, click a row to
+select it and click it again to drill in, scroll with the wheel, and click
+the status-bar hints (`[Tab]`, `[r]`, `[?]`, `[q]`) as buttons. In
+drill-down views the header's `[Esc: back]` is clickable and the wheel
+scrolls messages.
+
+Terminal notes: with the mouse protocol on, select text with **Shift+drag**
+(standard xterm behavior). Run with `--no-mouse` to disable mouse support
+entirely and restore normal drag-selection. In tmux, `set -g mouse on` is
+required for passthrough. Legacy Windows conhost handles mouse protocols
+poorly — use Windows Terminal.
+
 ## Privacy
 
 **claudetui sends no telemetry and your conversations never leave your machine.** It reads
