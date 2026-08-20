@@ -1,7 +1,7 @@
 import blessed from "blessed";
 import { createDashboard, type DashboardWidgets } from "./ui/layout.js";
 import { setupKeybindings, type FocusController } from "./ui/keybindings.js";
-import { setupMouse } from "./ui/mouse.js";
+import { setupMouse, setupStatusBarMouse } from "./ui/mouse.js";
 import { COLORS, PANEL_BORDER_COLORS, TABLE_PANEL_INDICES } from "./ui/theme.js";
 import { INTERVALS, applyPricingOverrides } from "./config.js";
 import { showLoadingOverlay } from "./ui/loading-overlay.js";
@@ -59,6 +59,12 @@ let focusController: FocusController;
 let mouseEnabled = true;
 // Task 5's help overlay toggles this; initialized false is harmless until then.
 let helpOpen = false;
+// Tag-stripped rendered status text, kept in sync inside updateStatusBar so
+// status-bar hit-testing always matches what's actually on screen.
+let statusPlainText = "";
+// Assigned in startApp; wireMouse() shares this with the "q"/Ctrl+C keybinding
+// so keyboard and mouse quit through the exact same code path.
+let quitApp: () => void = () => {};
 
 // A single refresh scans every recent transcript, so overlapping runs would
 // compete for the same I/O. One runs at a time; requests that arrive mid-run
@@ -149,15 +155,27 @@ function setupFocusHighlighting(): void {
   });
 }
 
-/** setupMouse call shared by rebuildLayout()'s resize path and startApp's initial wiring. */
+/** setupMouse/setupStatusBarMouse call shared by rebuildLayout()'s resize path and startApp's initial wiring. */
 function wireMouse(): void {
+  const isOverlayOpen = () => inDrillDown || helpOpen;
   setupMouse(screen, focusable, focusController, {
     onDrillIn: (panelIndex) => {
       if (panelIndex === HISTORY_PANEL_INDEX) void drillIntoHistory();
       else if (panelIndex === SESSIONS_PANEL_INDEX) void drillIntoSession();
     },
-    isOverlayOpen: () => inDrillDown || helpOpen,
+    isOverlayOpen,
   });
+  setupStatusBarMouse(
+    widgets.statusBar as unknown as blessed.Widgets.BlessedElement & { aleft: number },
+    focusController,
+    () => statusPlainText,
+    {
+      refresh: () => void refreshAll(),
+      help: () => showHelp(),
+      quit: quitApp,
+    },
+    isOverlayOpen
+  );
 }
 
 function showLoading(label = "Loading..."): void {
@@ -189,6 +207,8 @@ export async function startApp(): Promise<void> {
       screen.on("error", (err: Error) => {
         process.stderr.write(`[claudetui] screen error: ${err.message}\n`);
       });
+
+      quitApp = () => void stopApp().then(resolve);
 
       rebuildLayout();
 
@@ -224,9 +244,7 @@ export async function startApp(): Promise<void> {
         void refreshAll();
       });
 
-      screen.key(["q", "C-c"], () => {
-        void stopApp().then(resolve);
-      });
+      screen.key(["q", "C-c"], quitApp);
 
       // Initial load
       void (async () => {
@@ -378,6 +396,10 @@ function updateStatusBar(sessions: ActiveSession[], model?: string): void {
     `{gray-fg}up ${uptime}{/gray-fg}`,
     `{gray-fg}[Tab] [1-7] [r] [?] [q]{/gray-fg}`,
   ].join("  {gray-fg}│{/gray-fg}  ");
+
+  // Tag-stripped equivalent of what's actually rendered, including the
+  // leading space log() prepends — status-bar hit-testing keys off this.
+  statusPlainText = ` ${statusText.replace(/\{[^}]+\}/g, "")}`;
 
   clearLog(widgets.statusBar);
   widgets.statusBar.log(` ${statusText}`);

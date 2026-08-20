@@ -129,3 +129,44 @@ export function setupMouse(
     });
   });
 }
+
+/**
+ * Wire the status-bar hint buttons ([Tab] [r] [?] [q]). [1-7] is inert by
+ * design — see HINT_TOKENS. Hit-testing runs against the caller-supplied
+ * rendered plain text so variable-width fields (cost, token count) can't
+ * desync the click regions from what's actually on screen.
+ *
+ * Must be re-wired per widget generation exactly like setupMouse — the
+ * statusBar widget is recreated on every rebuildLayout() (e.g. on resize).
+ */
+export function setupStatusBarMouse(
+  statusBar: blessed.Widgets.BlessedElement & { aleft: number },
+  controller: FocusController,
+  getPlainText: () => string,
+  actions: {
+    refresh: () => void;
+    help: () => void;
+    quit: () => void;
+  },
+  isOverlayOpen: () => boolean
+): void {
+  statusBar.on("click", (data: { x: number }) => {
+    if (isOverlayOpen()) return;
+    const column = data.x - statusBar.aleft;
+    const action = hintActionAt(hintRegions(getPlainText()), column);
+    switch (action) {
+      case "tab":
+        controller.focusPanel(controller.getFocusIndex() + 1);
+        break;
+      case "refresh":
+        actions.refresh();
+        break;
+      case "help":
+        actions.help();
+        break;
+      case "quit":
+        actions.quit();
+        break;
+    }
+  });
+}
