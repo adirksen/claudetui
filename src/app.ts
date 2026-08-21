@@ -5,6 +5,11 @@ import { setupMouse, setupStatusBarMouse, isPointInBounds } from "./ui/mouse.js"
 import { COLORS, PANEL_BORDER_COLORS, TABLE_PANEL_INDICES } from "./ui/theme.js";
 import { INTERVALS, applyPricingOverrides } from "./config.js";
 import { showLoadingOverlay } from "./ui/loading-overlay.js";
+import {
+  registerOverlayCloser,
+  closeActiveOverlay,
+  releaseOverlayCloser,
+} from "./ui/overlay-close.js";
 
 // Data aggregators
 import { getAllSessions } from "./aggregators/session-aggregator.js";
@@ -64,7 +69,6 @@ let helpOpen = false;
 // when it runs. Lets the resize handler and a fresh showHelp() call close a
 // surviving help box that would otherwise be orphaned — see resize handler
 // and showHelp() below.
-let closeActiveHelp: (() => void) | null = null;
 // Tag-stripped rendered status text, kept in sync inside updateStatusBar so
 // status-bar hit-testing always matches what's actually on screen.
 let statusPlainText = "";
@@ -254,7 +258,7 @@ export async function startApp(
         // panels over the surviving helpBox, orphaning it: helpOpen stays
         // true (permanently suppressing mouse routing) and the post-rebuild
         // render steals focus so the box's Esc handler goes dead too.
-        closeActiveHelp?.();
+        closeActiveOverlay();
         if (inDrillDown) return;
         showLoading("Resizing...");
         rebuildLayout();
@@ -475,8 +479,8 @@ async function drillIntoHistory(): Promise<void> {
 function showHelp(): void {
   // Close any surviving help box first — e.g. pressing "?" again before the
   // old box's own key handler ran would otherwise leave two boxes stacked
-  // and desync helpOpen. Idempotent: closeActiveHelp is a no-op once fired.
-  closeActiveHelp?.();
+  // and desync helpOpen.
+  closeActiveOverlay();
 
   const helpBox = blessed.box({
     top: "center",
@@ -534,17 +538,18 @@ function showHelp(): void {
   };
 
   const closeHelp = () => {
-    // Idempotent — may be invoked via the resize handler, a fresh showHelp(),
-    // and the box's own key handler, in any order.
-    if (!helpOpen) return;
+    // Identity-claimed teardown: blessed re-emits a keypress on the
+    // previously-focused element after screen handlers run, so a superseded
+    // box's closeHelp can fire once more after a new box opened. The claim
+    // fails for that stale closure, keeping the new box's state intact.
+    if (!releaseOverlayCloser(closeHelp)) return;
     if (mouseEnabled) screen.removeListener("mouse", outsideClick);
     helpBox.destroy();
     helpOpen = false;
-    closeActiveHelp = null;
     screen.render();
   };
 
-  closeActiveHelp = closeHelp;
+  registerOverlayCloser(closeHelp);
 
   // A screen-level "mouse" listener is itself enough to make blessed enable
   // the terminal's mouse protocol, so --no-mouse must skip registering this
