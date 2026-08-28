@@ -3,36 +3,36 @@ import { mkdtemp, mkdir, writeFile, utimes, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// `PATHS` in src/config.ts is computed from os.homedir() at module import
-// time, and os.homedir() honors $HOME on macOS. So every scenario below sets
-// process.env.HOME to a fresh temp dir and calls vi.resetModules() BEFORE
-// dynamically importing the modules under test, forcing config.ts (and
-// everything that reads PATHS from it) to re-evaluate against the fake home.
-// Static top-of-file imports of those modules would bind to whatever HOME was
-// set at file-load time, so only dynamic imports are used here.
+// `PATHS` in src/config.ts is computed at module import time. Every scenario
+// below sets CLAUDETUI_HOME to a fresh temp directory and calls
+// vi.resetModules() BEFORE dynamically importing the modules under test,
+// forcing config.ts (and everything that reads PATHS from it) to re-evaluate
+// against the fake Claude data directory on every platform.
+// Static top-of-file imports of those modules would bind to whatever override
+// was set at file-load time, so only dynamic imports are used here.
 //
-// NOTE: This test file's reliance on process.env.HOME mutation and
+// NOTE: This test file's reliance on process.env.CLAUDETUI_HOME mutation and
 // vi.resetModules() assumes vitest's default configuration with `isolate: true`
 // (per-file worker processes). If a future vitest config sets `isolate: false`,
 // this file must be revisited to handle module caching across tests.
 
-const ORIGINAL_HOME = process.env.HOME;
+const ORIGINAL_CLAUDETUI_HOME = process.env.CLAUDETUI_HOME;
 
 async function makeHome(): Promise<string> {
   return mkdtemp(join(tmpdir(), "claudetui-today-agg-"));
 }
 
 async function loadTodayAggregator(home: string) {
-  process.env.HOME = home;
+  process.env.CLAUDETUI_HOME = join(home, ".claude");
   vi.resetModules();
   return import("./today-aggregator.js");
 }
 
 async function cleanup(home: string): Promise<void> {
-  if (ORIGINAL_HOME === undefined) {
-    delete process.env.HOME;
+  if (ORIGINAL_CLAUDETUI_HOME === undefined) {
+    delete process.env.CLAUDETUI_HOME;
   } else {
-    process.env.HOME = ORIGINAL_HOME;
+    process.env.CLAUDETUI_HOME = ORIGINAL_CLAUDETUI_HOME;
   }
   await rm(home, { recursive: true, force: true });
 }
@@ -247,7 +247,7 @@ describe("getTodayStats", () => {
       const oldMtime = beforeMidnight(1);
       await utimes(oldPath, oldMtime, oldMtime);
 
-      process.env.HOME = home;
+      process.env.CLAUDETUI_HOME = join(home, ".claude");
       vi.resetModules();
 
       const readCalls: string[] = [];

@@ -57,6 +57,14 @@ npm install
 npm run dev          # run directly, no build step
 ```
 
+For a safe local environment with synthetic Claude Code data:
+
+```bash
+npm run setup        # installs dependencies and creates .dev-home/
+npm run dev:demo     # runs against .dev-home/.claude, not your real data
+npm run cleanup      # removes generated .dev-home/ and dist/
+```
+
 To build a standalone bundle and put it on your `PATH`:
 
 ```bash
@@ -73,6 +81,23 @@ npm link             # then run `claudetui` from anywhere
 - Node.js 20+
 - [Claude Code](https://claude.ai/code) installed and used at least once (claudetui reads `~/.claude/`)
 - macOS, Linux, or Windows
+
+### Use a different Claude data directory
+
+By default, claudetui reads `~/.claude/`. Set `CLAUDETUI_HOME` to point directly
+to another Claude data directory when you want to inspect a copied or synthetic
+dataset instead:
+
+```bash
+CLAUDETUI_HOME=/path/to/.claude npm run dev
+```
+
+PowerShell:
+
+```powershell
+$env:CLAUDETUI_HOME = 'C:\path\to\.claude'
+npm run dev
+```
 
 ## Keybindings
 

@@ -2,5 +2,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 .env
+.dev-home/
 debug.log
 .superpowers/
