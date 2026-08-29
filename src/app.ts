@@ -487,7 +487,7 @@ function showHelp(): void {
     top: "center",
     left: "center",
     width: 52,
-    height: 18,
+    height: 19,
     tags: true,
     border: { type: "line" },
     style: {
@@ -509,6 +509,7 @@ function showHelp(): void {
       "  {yellow-fg}q / Ctrl+C{/yellow-fg}        Quit",
       "  {yellow-fg}?{/yellow-fg}                 Toggle help",
       "  {yellow-fg}Mouse{/yellow-fg}             Click panels/rows; wheel scrolls",
+      "  {yellow-fg}Shift+drag{/yellow-fg}        Select text (mouse mode)",
       "",
       "  {cyan-fg}⚡ Sessions{/cyan-fg}  — Enter to drill in",
       "  {cyan-fg}📜 History{/cyan-fg}   — Enter for session detail",
