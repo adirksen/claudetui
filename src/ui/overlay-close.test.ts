@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { EventEmitter } from "node:events";
 import {
   registerOverlayCloser,
   closeActiveOverlay,
   releaseOverlayCloser,
   resetOverlayCloser,
+  attachClickOutsideClose,
+  type MouseEventSource,
 } from "./overlay-close.js";
 
 beforeEach(resetOverlayCloser);
@@ -57,5 +60,86 @@ describe("overlay close registry", () => {
 
     closeActiveOverlay(); // B must still be reachable and closable
     expect(events).toEqual(["A closed", "B closed"]);
+  });
+});
+
+describe("attachClickOutsideClose", () => {
+  const bounds = { x: 10, y: 5, width: 20, height: 10 };
+
+  function makeFixture() {
+    const screen = new EventEmitter() as unknown as MouseEventSource & EventEmitter;
+    // Stands in for a dashboard element underneath the overlay (e.g. the
+    // status bar's [q] button). Mirrors the app's real gating: a click
+    // handler only acts when no overlay is open.
+    const underlying = new EventEmitter();
+    const activated: string[] = [];
+    let overlayOpen = true;
+
+    underlying.on("click", () => {
+      if (!overlayOpen) activated.push("click");
+    });
+
+    let closed = 0;
+    const close = () => {
+      overlayOpen = false;
+      closed++;
+    };
+
+    /**
+     * Replays blessed's per-report dispatch order for one full click at
+     * (x, y): Screen.prototype._listenMouse (node_modules/blessed/lib/
+     * widgets/screen.js) first dispatches to the topmost clickable element
+     * under the pointer — mousedown records it as self.mouseDown, mouseup
+     * emits 'click' on it and then the raw 'mouseup' — and only after that
+     * per-element dispatch does it emit the screen-level "mouse" event.
+     */
+    function press(x: number, y: number): void {
+      const down = { x, y, action: "mousedown" };
+      const up = { x, y, action: "mouseup" };
+      underlying.emit("mousedown", down);
+      screen.emit("mouse", down);
+      underlying.emit("click", down);
+      screen.emit("mouse", up);
+    }
+
+    return { screen, activated, close, press, getClosed: () => closed };
+  }
+
+  it("a click outside closes the overlay without activating the element underneath", () => {
+    const { screen, activated, close, press, getClosed } = makeFixture();
+    attachClickOutsideClose(screen, () => bounds, close);
+
+    press(2, 2); // outside bounds
+
+    expect(getClosed()).toBe(1);
+    expect(activated).toEqual([]);
+  });
+
+  it("a click inside the overlay does not close it", () => {
+    const { screen, close, press, getClosed } = makeFixture();
+    attachClickOutsideClose(screen, () => bounds, close);
+
+    press(15, 8); // inside bounds
+
+    expect(getClosed()).toBe(0);
+  });
+
+  it("mousemove outside does not close it", () => {
+    const { screen, close, getClosed } = makeFixture();
+    attachClickOutsideClose(screen, () => bounds, close);
+
+    screen.emit("mouse", { x: 2, y: 2, action: "mousemove" });
+
+    expect(getClosed()).toBe(0);
+  });
+
+  it("detach stops listening", () => {
+    const { screen, close, press, getClosed } = makeFixture();
+    const detach = attachClickOutsideClose(screen, () => bounds, close);
+
+    detach();
+    press(2, 2);
+
+    expect(getClosed()).toBe(0);
   });
 });

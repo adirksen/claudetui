@@ -1,7 +1,7 @@
 import blessed from "blessed";
 import { createDashboard, type DashboardWidgets } from "./ui/layout.js";
 import { setupKeybindings, type FocusController } from "./ui/keybindings.js";
-import { setupMouse, setupStatusBarMouse, isPointInBounds } from "./ui/mouse.js";
+import { setupMouse, setupStatusBarMouse } from "./ui/mouse.js";
 import { COLORS, PANEL_BORDER_COLORS, TABLE_PANEL_INDICES } from "./ui/theme.js";
 import { INTERVALS, applyPricingOverrides } from "./config.js";
 import { showLoadingOverlay } from "./ui/loading-overlay.js";
@@ -9,6 +9,7 @@ import {
   registerOverlayCloser,
   closeActiveOverlay,
   releaseOverlayCloser,
+  attachClickOutsideClose,
 } from "./ui/overlay-close.js";
 
 // Data aggregators
@@ -521,21 +522,10 @@ function showHelp(): void {
   screen.render();
   helpOpen = true;
 
-  // Click-outside-to-close: the screen-level "mouse" event fires for every
-  // mouse action (including mousemove), so it's filtered to "mousedown" —
-  // see node_modules/blessed/lib/program.js:677/749/891/930, where that's
-  // the action string blessed's parser actually assigns on button-press.
-  const outsideClick = (data: { x: number; y: number; action?: string }) => {
-    if (data.action !== "mousedown") return;
-    const bounds = helpBox as unknown as { atop: number; aleft: number };
-    const inside = isPointInBounds(data.x, data.y, {
-      x: Number(bounds.aleft),
-      y: Number(bounds.atop),
-      width: Number(helpBox.width),
-      height: Number(helpBox.height),
-    });
-    if (!inside) closeHelp();
-  };
+  // closeHelp is referenced by the attach call below but must exist before
+  // it (attachClickOutsideClose's third argument), so declare the detach
+  // slot first and assign it once closeHelp is defined.
+  let detach: () => void = () => {};
 
   const closeHelp = () => {
     // Identity-claimed teardown: blessed re-emits a keypress on the
@@ -543,7 +533,7 @@ function showHelp(): void {
     // box's closeHelp can fire once more after a new box opened. The claim
     // fails for that stale closure, keeping the new box's state intact.
     if (!releaseOverlayCloser(closeHelp)) return;
-    if (mouseEnabled) screen.removeListener("mouse", outsideClick);
+    detach();
     helpBox.destroy();
     helpOpen = false;
     screen.render();
@@ -553,9 +543,26 @@ function showHelp(): void {
 
   // A screen-level "mouse" listener is itself enough to make blessed enable
   // the terminal's mouse protocol, so --no-mouse must skip registering this
-  // one too, not just setupMouse/setupStatusBarMouse.
+  // one too, not just setupMouse/setupStatusBarMouse. Click-outside-to-close
+  // filters on "mouseup" rather than "mousedown" so the dashboard element
+  // under the click gets its own 'click' handler dispatched first, while
+  // help is still open to suppress it — see attachClickOutsideClose's doc
+  // comment in ui/overlay-close.ts for the full blessed dispatch-order
+  // rationale.
   if (mouseEnabled) {
-    screen.on("mouse", outsideClick);
+    detach = attachClickOutsideClose(
+      screen,
+      () => {
+        const bounds = helpBox as unknown as { atop: number; aleft: number };
+        return {
+          x: Number(bounds.aleft),
+          y: Number(bounds.atop),
+          width: Number(helpBox.width),
+          height: Number(helpBox.height),
+        };
+      },
+      closeHelp
+    );
   }
   helpBox.key(["escape", "q", "?", "enter", "space"], closeHelp);
 }
