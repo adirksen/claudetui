@@ -537,7 +537,11 @@ function showHelp(): void {
     detach();
     helpBox.destroy();
     helpOpen = false;
-    screen.render();
+    // A click that dismissed help was also dispatched to the panel beneath
+    // it, and blessed's 'element click' autofocus moved visible focus there
+    // while setupMouse's handler (correctly) ignored it — so focusIndex is
+    // stale. Re-asserting the controller's focus restores the invariant.
+    focusController.focusPanel(focusController.getFocusIndex());
   };
 
   registerOverlayCloser(closeHelp);

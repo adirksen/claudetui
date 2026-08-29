@@ -98,7 +98,7 @@ describe("attachClickOutsideClose", () => {
       const up = { x, y, action: "mouseup" };
       underlying.emit("mousedown", down);
       screen.emit("mouse", down);
-      underlying.emit("click", down);
+      underlying.emit("click", up);
       screen.emit("mouse", up);
     }
 
