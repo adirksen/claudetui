@@ -93,8 +93,8 @@ Within drill-down views, `j` / `k` or arrow keys scroll content.
 Mouse support is on by default: click a panel to focus it, click a row to
 select it and click it again to drill in, scroll with the wheel, and click
 the status-bar hints (`[Tab]`, `[r]`, `[?]`, `[q]`) as buttons. In
-drill-down views the header's `[Esc/q: back]` is clickable and the wheel
-scrolls messages.
+drill-down views, click `[Esc/q: back]` — in the session view's header, or
+in the history view's title bar — to go back; the wheel scrolls messages.
 
 Terminal notes: with the mouse protocol on, select text with **Shift+drag**
 (standard xterm behavior). Run with `--no-mouse` to disable mouse support

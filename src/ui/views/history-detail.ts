@@ -74,7 +74,7 @@ export async function showHistoryDetail(
       border: { fg: COLORS.mid.accent },
       label: { fg: COLORS.mid.accent, bold: true },
     },
-    label: " Session History ",
+    label: " Session History  [Esc/q: back] ",
     scrollable: true,
     mouse: mouseEnabled,
     keys: true,
@@ -203,12 +203,13 @@ export async function showHistoryDetail(
     container.key(["escape", "q", "enter"], close);
 
     // No distinct header element exists here — container is a single
-    // scrollable box whose top border carries the " Session History " label.
-    // That border row is the closest equivalent to session-detail's clickable
-    // header, so a click confined to that one row (not the scrollable body
-    // beneath it) closes the view. Registering a click listener is itself
-    // enough to make blessed enable the terminal's mouse protocol, so this is
-    // skipped when --no-mouse is set.
+    // scrollable box whose top border carries the label, which now includes
+    // the "[Esc/q: back]" hint for exactly this reason: a click confined to
+    // that one row (not the scrollable body beneath it) closes the view, and
+    // the label names that action so it reads as a button, matching
+    // session-detail's clickable header. Registering a click listener is
+    // itself enough to make blessed enable the terminal's mouse protocol, so
+    // this is skipped when --no-mouse is set.
     if (mouseEnabled) {
       container.on("click", (data: { x: number; y: number }) => {
         const bounds = container as unknown as {
