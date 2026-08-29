@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { EventEmitter } from "node:events";
+import { describe, it, expect, vi } from "vitest";
+import type blessed from "blessed";
+import type { FocusController } from "./keybindings.js";
 import {
   rowIndexFromClick,
   hintRegions,
@@ -7,6 +10,8 @@ import {
   contentColumnFromClick,
   isPointInBounds,
   parseMouseFlag,
+  setupMouse,
+  setupStatusBarMouse,
   type HintRegion,
 } from "./mouse.js";
 
@@ -132,5 +137,346 @@ describe("parseMouseFlag", () => {
   });
   it("disables with --no-mouse anywhere in argv", () => {
     expect(parseMouseFlag(["node", "claudetui", "--no-mouse"])).toBe(false);
+  });
+});
+
+// --- Handler-level tests for setupMouse and setupStatusBarMouse -----------
+//
+// These use EventEmitter fakes standing in for blessed widgets: setupMouse
+// and setupStatusBarMouse only call `.on(...)` plus a handful of members on
+// their arguments, so no real blessed screen is needed.
+
+/** Fake for a blessed list widget backing a table panel's rows. */
+class FakeRows extends EventEmitter {
+  atop = 3;
+  childBase = 0;
+  selected = 0;
+  select = vi.fn((i: number) => {
+    this.selected = i;
+  });
+}
+
+/** Fake for a scrollable log-style panel (non-table). */
+class FakeLog extends EventEmitter {
+  scroll = vi.fn();
+}
+
+/**
+ * Builds a 5-panel array matching TABLE_PANEL_INDICES = {0, 3, 4}: indices
+ * 0, 3, 4 are table panels (wrapping a FakeRows), indices 1, 2 are log
+ * panels (FakeLog is itself the click/wheel target). Fields are named
+ * rather than indexed so callers get typed, non-optional access.
+ */
+function makePanels(): {
+  panels: blessed.Widgets.BlessedElement[];
+  row0: FakeRows;
+  row3: FakeRows;
+  row4: FakeRows;
+  log1: FakeLog;
+  log2: FakeLog;
+} {
+  const row0 = new FakeRows();
+  const row3 = new FakeRows();
+  const row4 = new FakeRows();
+  const log1 = new FakeLog();
+  const log2 = new FakeLog();
+  const raw = [{ rows: row0 }, log1, log2, { rows: row3 }, { rows: row4 }];
+  return {
+    panels: raw as unknown as blessed.Widgets.BlessedElement[],
+    row0,
+    row3,
+    row4,
+    log1,
+    log2,
+  };
+}
+
+function makeController(): FocusController & {
+  focusPanel: ReturnType<typeof vi.fn>;
+  getFocusIndex: ReturnType<typeof vi.fn>;
+} {
+  return {
+    focusPanel: vi.fn(),
+    getFocusIndex: vi.fn(() => 0),
+  };
+}
+
+function makeScreen(): blessed.Widgets.Screen & { render: ReturnType<typeof vi.fn> } {
+  return { render: vi.fn() } as unknown as blessed.Widgets.Screen & {
+    render: ReturnType<typeof vi.fn>;
+  };
+}
+
+describe("setupMouse", () => {
+  it("clicking a log panel focuses it and does not drill in", () => {
+    const { panels, log1 } = makePanels();
+    const controller = makeController();
+    const onDrillIn = vi.fn();
+    const isOverlayOpen = vi.fn(() => false);
+    const screen = makeScreen();
+    setupMouse(screen, panels, controller, { onDrillIn, isOverlayOpen });
+
+    log1.emit("click", { x: 2, y: 5 });
+
+    expect(controller.focusPanel).toHaveBeenCalledWith(1);
+    expect(onDrillIn).not.toHaveBeenCalled();
+  });
+
+  it("clicking an unselected table row focuses, selects, and renders", () => {
+    const { panels, row0 } = makePanels();
+    const controller = makeController();
+    const onDrillIn = vi.fn();
+    const isOverlayOpen = vi.fn(() => false);
+    const screen = makeScreen();
+    setupMouse(screen, panels, controller, { onDrillIn, isOverlayOpen });
+
+    // Table panel 0: atop 5, scrolled down 2 rows (childBase). Click at
+    // absolute y=8 -> visible row 3 -> data row 3 + childBase 2 = 5.
+    row0.atop = 5;
+    row0.childBase = 2;
+    row0.selected = 0;
+    row0.emit("click", { x: 3, y: 8 });
+
+    expect(controller.focusPanel).toHaveBeenCalledWith(0);
+    expect(row0.select).toHaveBeenCalledWith(5);
+    expect(screen.render).toHaveBeenCalled();
+    expect(onDrillIn).not.toHaveBeenCalled();
+  });
+
+  it("clicking the already-selected row drills in instead of selecting", () => {
+    const { panels, row0 } = makePanels();
+    const controller = makeController();
+    const onDrillIn = vi.fn();
+    const isOverlayOpen = vi.fn(() => false);
+    const screen = makeScreen();
+    setupMouse(screen, panels, controller, { onDrillIn, isOverlayOpen });
+
+    row0.atop = 3;
+    row0.childBase = 0;
+    row0.selected = 2;
+    // visible row = 5 - 3 = 2, + childBase 0 = 2 === selected -> drill.
+    row0.emit("click", { x: 1, y: 5 });
+
+    expect(controller.focusPanel).toHaveBeenCalledWith(0);
+    expect(onDrillIn).toHaveBeenCalledWith(0);
+    expect(row0.select).not.toHaveBeenCalled();
+  });
+
+  it("clicking above the rows' top focuses but neither selects nor drills", () => {
+    const { panels, row0 } = makePanels();
+    const controller = makeController();
+    const onDrillIn = vi.fn();
+    const isOverlayOpen = vi.fn(() => false);
+    const screen = makeScreen();
+    setupMouse(screen, panels, controller, { onDrillIn, isOverlayOpen });
+
+    row0.atop = 5;
+    row0.emit("click", { x: 1, y: 2 }); // y < atop
+
+    expect(controller.focusPanel).toHaveBeenCalledWith(0);
+    expect(row0.select).not.toHaveBeenCalled();
+    expect(onDrillIn).not.toHaveBeenCalled();
+    expect(screen.render).not.toHaveBeenCalled();
+  });
+
+  it("does nothing on click, wheelup, or wheeldown while an overlay is open", () => {
+    const { panels, row0, log1 } = makePanels();
+    const controller = makeController();
+    const onDrillIn = vi.fn();
+    const isOverlayOpen = vi.fn(() => true);
+    const screen = makeScreen();
+    setupMouse(screen, panels, controller, { onDrillIn, isOverlayOpen });
+
+    row0.emit("click", { x: 1, y: 5 });
+    row0.emit("wheelup");
+    row0.emit("wheeldown");
+    log1.emit("click", { x: 1, y: 5 });
+    log1.emit("wheelup");
+    log1.emit("wheeldown");
+
+    expect(controller.focusPanel).not.toHaveBeenCalled();
+    expect(row0.select).not.toHaveBeenCalled();
+    expect(log1.scroll).not.toHaveBeenCalled();
+    expect(screen.render).not.toHaveBeenCalled();
+    expect(onDrillIn).not.toHaveBeenCalled();
+  });
+
+  it("wheelup clamps table selection at 0 and moves selection up otherwise", () => {
+    const { panels, row0, row3 } = makePanels();
+    const controller = makeController();
+    const onDrillIn = vi.fn();
+    const isOverlayOpen = vi.fn(() => false);
+    const screen = makeScreen();
+    setupMouse(screen, panels, controller, { onDrillIn, isOverlayOpen });
+
+    row0.selected = 0;
+    row0.emit("wheelup");
+    expect(row0.select).toHaveBeenCalledWith(0);
+    expect(screen.render).toHaveBeenCalledTimes(1);
+
+    row3.selected = 2;
+    row3.emit("wheelup");
+    expect(row3.select).toHaveBeenCalledWith(1);
+    expect(screen.render).toHaveBeenCalledTimes(2);
+  });
+
+  it("wheeldown moves table selection down by one and renders", () => {
+    const { panels, row4 } = makePanels();
+    const controller = makeController();
+    const onDrillIn = vi.fn();
+    const isOverlayOpen = vi.fn(() => false);
+    const screen = makeScreen();
+    setupMouse(screen, panels, controller, { onDrillIn, isOverlayOpen });
+
+    row4.selected = 2;
+    row4.emit("wheeldown");
+
+    expect(row4.select).toHaveBeenCalledWith(3);
+    expect(screen.render).toHaveBeenCalledTimes(1);
+  });
+
+  it("wheelup / wheeldown on a log panel scroll it and render", () => {
+    const { panels, log1, log2 } = makePanels();
+    const controller = makeController();
+    const onDrillIn = vi.fn();
+    const isOverlayOpen = vi.fn(() => false);
+    const screen = makeScreen();
+    setupMouse(screen, panels, controller, { onDrillIn, isOverlayOpen });
+
+    log1.emit("wheelup");
+    expect(log1.scroll).toHaveBeenCalledWith(-1);
+    expect(screen.render).toHaveBeenCalledTimes(1);
+
+    log2.emit("wheeldown");
+    expect(log2.scroll).toHaveBeenCalledWith(1);
+    expect(screen.render).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** Fake for the blessed status-bar widget: a bordered element with click. */
+class FakeStatusBar extends EventEmitter {
+  aleft = 0;
+  ileft = 1; // line border
+}
+
+const STATUS_TEXT =
+  " model fable-5  │  2 alive  │  1.2M tok  │  $3.21  │  up 1h  │  [Tab] [1-7] [r] [?] [q]";
+
+function makeStatusBarHarness(aleft = 0) {
+  const statusBar = new FakeStatusBar();
+  statusBar.aleft = aleft;
+  const controller = makeController();
+  const actions = {
+    refresh: vi.fn(),
+    help: vi.fn(),
+    quit: vi.fn(),
+  };
+  const isOverlayOpen = vi.fn(() => false);
+  setupStatusBarMouse(
+    statusBar as unknown as blessed.Widgets.BlessedElement & {
+      aleft: number;
+      ileft: number;
+    },
+    controller,
+    () => STATUS_TEXT,
+    actions,
+    isOverlayOpen
+  );
+  const regions = hintRegions(STATUS_TEXT);
+  const xFor = (col: number) => col + statusBar.aleft + statusBar.ileft;
+  return { statusBar, controller, actions, isOverlayOpen, regions, xFor };
+}
+
+describe("setupStatusBarMouse", () => {
+  it("clicking [Tab] advances focus from the controller's current index", () => {
+    const { statusBar, controller, xFor, regions } = makeStatusBarHarness();
+    controller.getFocusIndex.mockReturnValue(2);
+    const region = regions.find((r) => r.action === "tab")!;
+
+    statusBar.emit("click", { x: xFor(region.start) });
+
+    expect(controller.focusPanel).toHaveBeenCalledWith(3);
+  });
+
+  it("clicking [r] triggers refresh only", () => {
+    const { statusBar, actions, xFor, regions } = makeStatusBarHarness();
+    const region = regions.find((r) => r.action === "refresh")!;
+
+    statusBar.emit("click", { x: xFor(region.start) });
+
+    expect(actions.refresh).toHaveBeenCalledTimes(1);
+    expect(actions.help).not.toHaveBeenCalled();
+    expect(actions.quit).not.toHaveBeenCalled();
+  });
+
+  it("clicking [?] triggers help only", () => {
+    const { statusBar, actions, xFor, regions } = makeStatusBarHarness();
+    const region = regions.find((r) => r.action === "help")!;
+
+    statusBar.emit("click", { x: xFor(region.start) });
+
+    expect(actions.help).toHaveBeenCalledTimes(1);
+    expect(actions.refresh).not.toHaveBeenCalled();
+    expect(actions.quit).not.toHaveBeenCalled();
+  });
+
+  it("clicking [q] triggers quit only", () => {
+    const { statusBar, actions, xFor, regions } = makeStatusBarHarness();
+    const region = regions.find((r) => r.action === "quit")!;
+
+    statusBar.emit("click", { x: xFor(region.start) });
+
+    expect(actions.quit).toHaveBeenCalledTimes(1);
+    expect(actions.refresh).not.toHaveBeenCalled();
+    expect(actions.help).not.toHaveBeenCalled();
+  });
+
+  it("dispatches on the token's last character but not the column after it", () => {
+    const { statusBar, actions, xFor, regions } = makeStatusBarHarness();
+    const region = regions.find((r) => r.action === "quit")!;
+
+    statusBar.emit("click", { x: xFor(region.end) });
+    expect(actions.quit).toHaveBeenCalledTimes(1);
+
+    actions.quit.mockClear();
+    statusBar.emit("click", { x: xFor(region.end + 1) });
+    expect(actions.quit).not.toHaveBeenCalled();
+  });
+
+  it("dispatches nothing for [1-7], a separator, or the border column", () => {
+    const { statusBar, actions, controller, xFor } = makeStatusBarHarness();
+
+    const oneToSevenStart = STATUS_TEXT.indexOf("[1-7]");
+    statusBar.emit("click", { x: xFor(oneToSevenStart + 1) }); // inside "1-7"
+
+    const sepColumn = STATUS_TEXT.indexOf("│");
+    statusBar.emit("click", { x: xFor(sepColumn) });
+
+    statusBar.emit("click", { x: 0 }); // border column, left of content
+
+    expect(controller.focusPanel).not.toHaveBeenCalled();
+    expect(actions.refresh).not.toHaveBeenCalled();
+    expect(actions.help).not.toHaveBeenCalled();
+    expect(actions.quit).not.toHaveBeenCalled();
+  });
+
+  it("dispatches nothing while an overlay is open, even on a hint token", () => {
+    const { statusBar, actions, isOverlayOpen, xFor, regions } =
+      makeStatusBarHarness();
+    isOverlayOpen.mockReturnValue(true);
+    const region = regions.find((r) => r.action === "quit")!;
+
+    statusBar.emit("click", { x: xFor(region.start) });
+
+    expect(actions.quit).not.toHaveBeenCalled();
+  });
+
+  it("applies a non-zero aleft when hit-testing the same content column", () => {
+    const { statusBar, actions, xFor, regions } = makeStatusBarHarness(4);
+    const region = regions.find((r) => r.action === "refresh")!;
+
+    statusBar.emit("click", { x: xFor(region.start) });
+
+    expect(actions.refresh).toHaveBeenCalledTimes(1);
   });
 });
