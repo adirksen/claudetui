@@ -1,9 +1,16 @@
 import blessed from "blessed";
 import { createDashboard, type DashboardWidgets } from "./ui/layout.js";
-import { setupKeybindings } from "./ui/keybindings.js";
+import { setupKeybindings, type FocusController } from "./ui/keybindings.js";
+import { setupMouse, setupStatusBarMouse } from "./ui/mouse.js";
 import { COLORS, PANEL_BORDER_COLORS, TABLE_PANEL_INDICES } from "./ui/theme.js";
 import { INTERVALS, applyPricingOverrides } from "./config.js";
 import { showLoadingOverlay } from "./ui/loading-overlay.js";
+import {
+  registerOverlayCloser,
+  closeActiveOverlay,
+  releaseOverlayCloser,
+  attachClickOutsideClose,
+} from "./ui/overlay-close.js";
 
 // Data aggregators
 import { getAllSessions } from "./aggregators/session-aggregator.js";
@@ -52,6 +59,23 @@ let cachedSessions: ActiveSession[] = [];
 let cachedHistory: HistoryEntry[] = [];
 let inDrillDown = false;
 let hideLoading: (() => void) | undefined;
+// Assigned in startApp; read by mouse click routing.
+let focusController: FocusController;
+// Task 6 threads this flag from --no-mouse.
+let mouseEnabled = true;
+// showHelp()/closeHelp() toggle this so wireMouse()'s isOverlayOpen() knows
+// mouse routing should stay suppressed while the help overlay is open.
+let helpOpen = false;
+// Set by showHelp() to that invocation's closeHelp, cleared by closeHelp()
+// when it runs. Lets the resize handler and a fresh showHelp() call close a
+// surviving help box that would otherwise be orphaned — see resize handler
+// and showHelp() below.
+// Tag-stripped rendered status text, kept in sync inside updateStatusBar so
+// status-bar hit-testing always matches what's actually on screen.
+let statusPlainText = "";
+// Assigned in startApp; wireMouse() shares this with the "q"/Ctrl+C keybinding
+// so keyboard and mouse quit through the exact same code path.
+let quitApp: () => void = () => {};
 
 // A single refresh scans every recent transcript, so overlapping runs would
 // compete for the same I/O. One runs at a time; requests that arrive mid-run
@@ -95,6 +119,14 @@ function rebuildLayout(): void {
 
   setupFocusHighlighting();
 
+  // Re-wire mouse listeners — rebuild destroys and recreates every widget, so
+  // any prior listeners are gone with them. Guarded: on the very first call
+  // (from startApp, before setupKeybindings runs) focusController is still
+  // undefined; startApp makes the one explicit wireMouse() call for that case.
+  if (mouseEnabled && focusController) {
+    wireMouse();
+  }
+
   // Reset stale fingerprints so fresh widgets always get populated after rebuild
   resetTokensFP();
   resetSystemFP();
@@ -134,6 +166,32 @@ function setupFocusHighlighting(): void {
   });
 }
 
+/** setupMouse/setupStatusBarMouse call shared by rebuildLayout()'s resize path and startApp's initial wiring. */
+function wireMouse(): void {
+  const isOverlayOpen = () => inDrillDown || helpOpen;
+  setupMouse(screen, focusable, focusController, {
+    onDrillIn: (panelIndex) => {
+      if (panelIndex === HISTORY_PANEL_INDEX) void drillIntoHistory();
+      else if (panelIndex === SESSIONS_PANEL_INDEX) void drillIntoSession();
+    },
+    isOverlayOpen,
+  });
+  setupStatusBarMouse(
+    widgets.statusBar as unknown as blessed.Widgets.BlessedElement & {
+      aleft: number;
+      ileft: number;
+    },
+    focusController,
+    () => statusPlainText,
+    {
+      refresh: () => void refreshAll(),
+      help: () => showHelp(),
+      quit: quitApp,
+    },
+    isOverlayOpen
+  );
+}
+
 function showLoading(label = "Loading..."): void {
   hideLoading?.();
   hideLoading = showLoadingOverlay(screen, label);
@@ -150,9 +208,13 @@ function dismissLoading(): void {
  * Start the TUI application.
  * Returns a promise that resolves only when the user quits (q / Ctrl+C).
  */
-export async function startApp(): Promise<void> {
+export async function startApp(
+  options: { mouse?: boolean } = {}
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     try {
+      mouseEnabled = options.mouse ?? true;
+
       screen = blessed.screen({
         smartCSR: true,
         title: "claudetui — Claude Code Monitor",
@@ -164,9 +226,11 @@ export async function startApp(): Promise<void> {
         process.stderr.write(`[claudetui] screen error: ${err.message}\n`);
       });
 
+      quitApp = () => void stopApp().then(resolve);
+
       rebuildLayout();
 
-      setupKeybindings(screen, focusable, {
+      focusController = setupKeybindings(screen, focusable, {
         onRefresh: () => void refreshAll(),
         onDrillIn: (panelIndex) => {
           if (panelIndex === HISTORY_PANEL_INDEX) {
@@ -182,8 +246,20 @@ export async function startApp(): Promise<void> {
         onHelp: () => showHelp(),
       });
 
+      // First rebuildLayout() ran before focusController existed (its own
+      // guard skipped setupMouse), so wire it explicitly here. Every
+      // subsequent rebuild (resize) re-wires itself via the guard above.
+      if (mouseEnabled) {
+        wireMouse();
+      }
+
       // Rebuild grid on terminal resize (contrib.grid uses absolute px at creation time)
       screen.on("resize", () => {
+        // Close any open help overlay first — rebuildLayout() re-appends
+        // panels over the surviving helpBox, orphaning it: helpOpen stays
+        // true (permanently suppressing mouse routing) and the post-rebuild
+        // render steals focus so the box's Esc handler goes dead too.
+        closeActiveOverlay();
         if (inDrillDown) return;
         showLoading("Resizing...");
         rebuildLayout();
@@ -191,9 +267,7 @@ export async function startApp(): Promise<void> {
         void refreshAll();
       });
 
-      screen.key(["q", "C-c"], () => {
-        void stopApp().then(resolve);
-      });
+      screen.key(["q", "C-c"], quitApp);
 
       // Initial load
       void (async () => {
@@ -346,6 +420,10 @@ function updateStatusBar(sessions: ActiveSession[], model?: string): void {
     `{gray-fg}[Tab] [1-7] [r] [?] [q]{/gray-fg}`,
   ].join("  {gray-fg}│{/gray-fg}  ");
 
+  // Tag-stripped equivalent of what's actually rendered, including the
+  // leading space log() prepends — status-bar hit-testing keys off this.
+  statusPlainText = ` ${statusText.replace(/\{[^}]+\}/g, "")}`;
+
   clearLog(widgets.statusBar);
   widgets.statusBar.log(` ${statusText}`);
 }
@@ -370,10 +448,17 @@ async function drillIntoSession(): Promise<void> {
     readConversation(projectDir, session.sessionId),
   ]);
 
-  showSessionDetail(screen, session, agents, entries, () => {
-    inDrillDown = false;
-    void refreshAll();
-  });
+  showSessionDetail(
+    screen,
+    session,
+    agents,
+    entries,
+    () => {
+      inDrillDown = false;
+      void refreshAll();
+    },
+    mouseEnabled
+  );
 }
 
 async function drillIntoHistory(): Promise<void> {
@@ -385,7 +470,7 @@ async function drillIntoHistory(): Promise<void> {
   if (!entry) return;
 
   inDrillDown = true;
-  await showHistoryDetail(screen, entry, cachedHistory);
+  await showHistoryDetail(screen, entry, cachedHistory, mouseEnabled);
   inDrillDown = false;
   void refreshAll();
 }
@@ -393,11 +478,16 @@ async function drillIntoHistory(): Promise<void> {
 // ── Help overlay ──────────────────────────────────────────────────────────────
 
 function showHelp(): void {
+  // Close any surviving help box first — e.g. pressing "?" again before the
+  // old box's own key handler ran would otherwise leave two boxes stacked
+  // and desync helpOpen.
+  closeActiveOverlay();
+
   const helpBox = blessed.box({
     top: "center",
     left: "center",
     width: 52,
-    height: 18,
+    height: 19,
     tags: true,
     border: { type: "line" },
     style: {
@@ -418,6 +508,8 @@ function showHelp(): void {
       "  {yellow-fg}r{/yellow-fg}                 Force refresh",
       "  {yellow-fg}q / Ctrl+C{/yellow-fg}        Quit",
       "  {yellow-fg}?{/yellow-fg}                 Toggle help",
+      "  {yellow-fg}Mouse{/yellow-fg}             Click panels/rows; wheel scrolls",
+      "  {yellow-fg}Shift+drag{/yellow-fg}        Select text (mouse mode)",
       "",
       "  {cyan-fg}⚡ Sessions{/cyan-fg}  — Enter to drill in",
       "  {cyan-fg}📜 History{/cyan-fg}   — Enter for session detail",
@@ -429,11 +521,55 @@ function showHelp(): void {
   screen.append(helpBox);
   helpBox.focus();
   screen.render();
+  helpOpen = true;
 
-  helpBox.key(["escape", "q", "?", "enter", "space"], () => {
+  // closeHelp is referenced by the attach call below but must exist before
+  // it (attachClickOutsideClose's third argument), so declare the detach
+  // slot first and assign it once closeHelp is defined.
+  let detach: () => void = () => {};
+
+  const closeHelp = () => {
+    // Identity-claimed teardown: blessed re-emits a keypress on the
+    // previously-focused element after screen handlers run, so a superseded
+    // box's closeHelp can fire once more after a new box opened. The claim
+    // fails for that stale closure, keeping the new box's state intact.
+    if (!releaseOverlayCloser(closeHelp)) return;
+    detach();
     helpBox.destroy();
-    screen.render();
-  });
+    helpOpen = false;
+    // A click that dismissed help was also dispatched to the panel beneath
+    // it, and blessed's 'element click' autofocus moved visible focus there
+    // while setupMouse's handler (correctly) ignored it — so focusIndex is
+    // stale. Re-asserting the controller's focus restores the invariant.
+    focusController.focusPanel(focusController.getFocusIndex());
+  };
+
+  registerOverlayCloser(closeHelp);
+
+  // A screen-level "mouse" listener is itself enough to make blessed enable
+  // the terminal's mouse protocol, so --no-mouse must skip registering this
+  // one too, not just setupMouse/setupStatusBarMouse. Click-outside-to-close
+  // filters on "mouseup" rather than "mousedown" so the dashboard element
+  // under the click gets its own 'click' handler dispatched first, while
+  // help is still open to suppress it — see attachClickOutsideClose's doc
+  // comment in ui/overlay-close.ts for the full blessed dispatch-order
+  // rationale.
+  if (mouseEnabled) {
+    detach = attachClickOutsideClose(
+      screen,
+      () => {
+        const bounds = helpBox as unknown as { atop: number; aleft: number };
+        return {
+          x: Number(bounds.aleft),
+          y: Number(bounds.atop),
+          width: Number(helpBox.width),
+          height: Number(helpBox.height),
+        };
+      },
+      closeHelp
+    );
+  }
+  helpBox.key(["escape", "q", "?", "enter", "space"], closeHelp);
 }
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────
