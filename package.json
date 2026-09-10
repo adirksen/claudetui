@@ -21,6 +21,9 @@
   },
   "scripts": {
     "dev": "tsx bin/claudetui.ts",
+    "setup": "node scripts/setup.mjs",
+    "dev:demo": "node scripts/dev-demo.mjs",
+    "cleanup": "node scripts/cleanup.mjs",
     "build": "esbuild bin/claudetui.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/claudetui.js --external:neo-blessed --external:blessed --external:blessed-contrib --external:term.js --external:pty.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",

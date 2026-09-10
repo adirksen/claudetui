@@ -2,7 +2,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ModelPricing } from "./types.js";
 
-export const CLAUDE_HOME = join(homedir(), ".claude");
+/**
+ * The directory containing Claude Code's data. CLAUDETUI_HOME is primarily
+ * useful for demos and tests, where reading the user's real data is unwanted.
+ */
+export const CLAUDE_HOME = process.env.CLAUDETUI_HOME || join(homedir(), ".claude");
 
 export const PATHS = {
   history: join(CLAUDE_HOME, "history.jsonl"),
